@@ -21,10 +21,11 @@ library(glmnet)
 tidymodels_prefer()
 Pokemon <- read_csv("Pokemon.csv")
 library(janitor)
-library(janitor)
 library(randomForest)
 library(xgboost)
 library(rpart.plot)
+library(ranger)
+library(vip)
 ```
 ### Exercise 1
 
@@ -129,7 +130,8 @@ class_tree_spec <- tree_spec %>%
 
 class_tree_fit <- class_tree_spec %>%
   fit(type_1 ~ legendary + generation + sp_atk +
-                           attack + speed + defense + hp + sp_def, data = pokemon_train)
+                           attack + speed + defense + hp + sp_def,
+      data = pokemon_train)
 
 class_tree_fit %>%
   extract_fit_engine() %>%
@@ -175,14 +177,7 @@ best_pruned
 
 ```
 
-```{r}
 
-```
-
-```{r}
-
-
-```
 
 
 ### Exercise 5
@@ -204,59 +199,86 @@ class_tree_final_fit %>%
   rpart.plot()
 
 ```
-```{r}
-
-
-```
-
-```{r}
-
-
-```
 
 
 ### Exercise 5
 
 Now set up a random forest model and workflow. Use the `ranger` engine and set `importance = "impurity"`. Tune `mtry`, `trees`, and `min_n`. Using the documentation for `rand_forest()`, explain in your own words what each of these hyperparameters represent.
 
+mode is how we want our outcome to be reached.
+engine is the computation engine.
+mtry is the number of predictors we will resample each split.
+trees is the number of trees.
+min_n is the minimum number of data in a node
+
 Create a regular grid with 8 levels each. You can choose plausible ranges for each hyperparameter. Note that `mtry` should not be smaller than 1 or larger than 8. **Explain why not. What type of model would `mtry = 8` represent?**
+
+mtry represents the integer for the number of predictors that will be randomly sampled at each split when creating the tree models.We can not have less than 1 because then we are not sampling any predictors, more than 8 would be too many. So mtry = 8 means we are randomly sampling 8 predictors in each split when creating the tree models.
+
 ```{r}
+forest_spec <- rand_forest(
+  mode = "classification",
+  mtry = tune(),
+  trees = tune(),
+  min_n = tune()
+)%>%
+  set_engine("ranger", importance = "impurity") 
+
+forest_wf <- workflow() %>%
+  add_model(forest_spec %>% 
+              set_args(mtry = tune(), trees = tune(),
+                       min_n = tune()
+                       )
+            ) %>%
+  add_recipe(pokemon_recipe)
 
 
 ```
 
 ```{r}
-
-
+forest_grid <- grid_regular(mtry(range = c(1, 8)), 
+                            trees(range = c(1, 100)),
+                            min_n(range = c(1, 5)),
+                            levels = 8)
+forest_grid
 ```
 
 
 ### Exercise 6
 
 Specify `roc_auc` as a metric. Tune the model and print an `autoplot()` of the results. What do you observe? What values of the hyperparameters seem to yield the best performance?
-```{r}
 
+The general trend is that as the number of randomly selected predictors goes up, roc_auc goes up, the minimal node size does not matter much, and when tree is one, it performs the worst. When the hyperparameters has a high minimal node number, high tree number, and high randomly selected predictor, the model seems to yield the best performance. 
+
+```{r}
+forest_tune_res <- tune_grid(
+  forest_wf, 
+  resamples = pokemon_folds, 
+  grid = forest_grid, 
+  metrics = metric_set(roc_auc)
+)
 
 ```
 
 ```{r}
-
-
+autoplot(forest_tune_res)
 ```
 
 
 ### Exercise 7
 
 What is the `roc_auc` of your best-performing random forest model on the folds? *Hint: Use `collect_metrics()` and `arrange()`.*
+
+The `roc_auc` of my best-performing random forest model on the folds is 0.7548953	
+
 ```{r}
+collect_metrics(forest_tune_res) %>% arrange()
+best_forest <- select_best(forest_tune_res, metric = "roc_auc")
+best_forest
 
 
 ```
 
-```{r}
-
-
-```
 
 
 ### Exercise 8
@@ -264,9 +286,15 @@ What is the `roc_auc` of your best-performing random forest model on the folds? 
 Create a variable importance plot, using `vip()`, with your best-performing random forest model fit on the *training* set.
 
 Which variables were most useful? Which were least useful? Are these results what you expected, or not?
+
+The most useful variables are sp_attack, attack, speed, hp, sp_defense, and defense. Legendary or not is the least useful. They are about the same as I expected, since we have checked the correlations before.
+
 ```{r}
-
-
+rf_final <- finalize_workflow(forest_wf, best_forest)
+rf_fit_final <- fit(rf_final, data = pokemon_train)
+rf_fit_final %>%
+  pull_workflow_fit()%>%
+  vip()
 ```
 
 ```{r}
@@ -282,6 +310,11 @@ Finally, set up a boosted tree model and workflow. Use the `xgboost` engine. Tun
 What do you observe?
 
 What is the `roc_auc` of your best-performing boosted tree model on the folds? *Hint: Use `collect_metrics()` and `arrange()`.*
+
+boost_spec <- boost_tree(trees = 5000, tree_depth = 4) %>%
+  set_engine("xgboost") %>%
+  set_mode("regression")
+  
 ```{r}
 
 
