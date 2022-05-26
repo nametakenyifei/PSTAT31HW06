@@ -26,6 +26,7 @@ library(xgboost)
 library(rpart.plot)
 library(ranger)
 library(vip)
+library(pROC)
 ```
 ### Exercise 1
 
@@ -171,10 +172,17 @@ What is the `roc_auc` of your best-performing pruned decision tree on the folds?
 The `roc_auc` of your best-performing pruned decision tree on the folds is 0.6759523
 
 ```{r}
-collect_metrics(tune_res) %>% arrange()
+collection1 <- collect_metrics(tune_res) %>% arrange(desc(mean))
+collection1
+
 best_pruned <- select_best(tune_res, metric = "roc_auc")
 best_pruned
 
+tree_best_roc_auc <- collection1 %>% 
+  slice(1) %>% 
+  pull(mean)
+
+tree_best_roc_auc
 ```
 
 
@@ -272,11 +280,18 @@ What is the `roc_auc` of your best-performing random forest model on the folds? 
 The `roc_auc` of my best-performing random forest model on the folds is 0.7548953	
 
 ```{r}
-collect_metrics(forest_tune_res) %>% arrange()
+collection2 <- collect_metrics(forest_tune_res) %>% 
+  arrange(desc(mean))
+collection2
+
 best_forest <- select_best(forest_tune_res, metric = "roc_auc")
 best_forest
 
+forest_best_roc_auc <- collection2 %>% 
+  slice(1) %>% 
+  pull(mean)
 
+forest_best_roc_auc
 ```
 
 
@@ -297,64 +312,128 @@ rf_fit_final %>%
   vip()
 ```
 
-```{r}
-
-
-```
 
 
 ### Exercise 9
 
 Finally, set up a boosted tree model and workflow. Use the `xgboost` engine. Tune `trees`. Create a regular grid with 10 levels; let `trees` range from 10 to 2000. Specify `roc_auc` and again print an `autoplot()` of the results. 
 
+```{r}
+boost_spec <- boost_tree(
+  mode = "classification",
+  engine = "xgboost",
+  trees = tune(),
+)
+
+boost_wf <- workflow() %>%
+  add_model(boost_spec %>% 
+              set_args(trees = tune()
+                       )
+            ) %>%
+  add_recipe(pokemon_recipe)
+```
+
+```{r}
+boost_grid <- grid_regular(trees(range = c(10, 2000)), 
+                           levels = 10)
+boost_grid
+
+```
+
+```{r}
+boost_tune_res <- tune_grid(
+  boost_wf, 
+  resamples = pokemon_folds, 
+  grid = boost_grid, 
+  metrics = metric_set(roc_auc)
+)
+```
+
+```{r}
+autoplot(boost_tune_res)
+```
 What do you observe?
+
+The roc_auc result peaked when it is around 500, but the started dropping, so having a large tree number does not necessarily mean it is a good thing.
 
 What is the `roc_auc` of your best-performing boosted tree model on the folds? *Hint: Use `collect_metrics()` and `arrange()`.*
 
-boost_spec <- boost_tree(trees = 5000, tree_depth = 4) %>%
-  set_engine("xgboost") %>%
-  set_mode("regression")
-  
-```{r}
-
-
-```
+The `roc_auc` of my best-performing boosted tree model on the folds is 0.7377360	
 
 ```{r}
+collection3 <- collect_metrics(boost_tune_res) %>% arrange(desc(mean))
+collection3
 
+best_boost <- select_best(boost_tune_res, metric = "roc_auc")
+best_boost
 
+boost_best_roc_auc <- collection3 %>% 
+  slice(1) %>% 
+  pull(mean)
+boost_best_roc_auc
 ```
-
-
 ### Exercise 10
 
 Display a table of the three ROC AUC values for your best-performing pruned tree, random forest, and boosted tree models. Which performed best on the folds? Select the best of the three and use `select_best()`, `finalize_workflow()`, and `fit()` to fit it to the *testing* set. 
 
+The random forest model performed the best.
+
+```{r}
+roc_auc_table <- matrix(c("tree", "forest", "boost",
+                          tree_best_roc_auc, forest_best_roc_auc,
+                          boost_best_roc_auc), ncol=3, byrow=TRUE)
+roc_auc_table
+```
+```{r}
+best_forest <- select_best(forest_tune_res, metric = "roc_auc")
+
+final <- finalize_workflow(forest_wf, best_forest)
+fit_final <- fit(final, data = pokemon_test)
+fit_final
+```
+
 Print the AUC value of your best-performing model on the testing set. Print the ROC curves. Finally, create and visualize a confusion matrix heat map.
+
+```{r}
+prediction <- predict(fit_final, pokemon_test)
+prediction  
+pokemon_test$type_1
+```
+```{r}
+auc_score <- auc(as.numeric(pokemon_test$type_1),
+                 as.numeric(unlist(prediction))
+                 )
+auc_score
+```
 
 Which classes was your model most accurate at predicting? Which was it worst at?
 
-```{r}
+My model's most accurate is a tie between all elements except for fire. It is worst at predicting fire.
 
+```{r}
+augment(fit_final, new_data = pokemon_test) %>%
+  roc_curve(truth = type_1, estimate = c(.pred_Bug, .pred_Fire, 
+                                       .pred_Grass, .pred_Normal, 
+                                       .pred_Psychic, .pred_Water
+                                       ))%>%
+              autoplot()
+```
+
+```{r }
+augment(fit_final, new_data = pokemon_test) %>%
+  conf_mat(truth = type_1, estimate = .pred_class) %>% 
+  autoplot(type = "heatmap")
+```
+
+```{r}
 
 ```
 
 
 ```{r}
 
-
 ```
 
 ```{r}
 
-
 ```
-
-
-
-```{r}
-
-
-```
-
-
